@@ -87,6 +87,7 @@ internal val gboardKeyboardSymbolKeyLabelPatch = bytecodePatch(
         }
 
         val call = RuntimeCallId.KEYBOARD_RUNTIME_SANITIZE_KEY_LABEL
+        val stickerIcCall = RuntimeCallId.CUSTOM_STICKERS_ON_INPUT_CONNECTION_ACTIVE
         for (method in methodsToHook) {
             val implementation = method.implementation ?: continue
             val instructions = implementation.instructions
@@ -97,13 +98,20 @@ internal val gboardKeyboardSymbolKeyLabelPatch = bytecodePatch(
             // In AutoCenterScaleTextView.setText(CharSequence, BufferType), p1 is CharSequence.
             // In InputConnectionUtil.f(InputConnection, CharSequence, int), p1 is CharSequence.
             // In InputConnectionUtil.h(InputConnection, CharSequence, int, Object), p1 is CharSequence.
-            method.addInstructions(
-                0,
+            val hasInputConnectionArg = method.parameterTypes.firstOrNull() == "Landroid/view/inputmethod/InputConnection;"
+            val instructionsToAdd = if (hasInputConnectionArg) {
+                """
+                    ${RuntimeCallEmitter.invoke(stickerIcCall, "p0")}
+                    ${RuntimeCallEmitter.invoke(call, "p1")}
+                    move-result-object p1
+                """.trimIndent()
+            } else {
                 """
                     ${RuntimeCallEmitter.invoke(call, "p1")}
                     move-result-object p1
                 """.trimIndent()
-            )
+            }
+            method.addInstructions(0, instructionsToAdd)
         }
     }
 }

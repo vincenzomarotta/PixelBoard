@@ -40,6 +40,17 @@ public final class GboardClipboardSyncRuntime {
             return;
         }
         try {
+            Field ctxField = resolveContextField(handler);
+            if (ctxField != null) {
+                Object ctx = ctxField.get(handler);
+                if (ctx instanceof Context) {
+                    com.akshaykadam.pixelboard.extension.stickers.GboardCustomStickerRuntime
+                            .onStartInputView((Context) ctx, null);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
             ensureClipboardManager(handler);
             ensureScreenshotObserver(handler);
             triggerScreenshotCheck(handler);

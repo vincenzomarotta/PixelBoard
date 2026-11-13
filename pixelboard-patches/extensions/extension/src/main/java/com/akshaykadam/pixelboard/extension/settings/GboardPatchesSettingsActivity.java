@@ -107,6 +107,8 @@ import java.util.concurrent.RejectedExecutionException;
 import com.akshaykadam.pixelboard.extension.R;
 import com.akshaykadam.pixelboard.extension.BuildConfig;
 import com.akshaykadam.pixelboard.extension.settings.keyboardpreview.GboardKeyboardPreviewController;
+import com.akshaykadam.pixelboard.extension.stickers.GboardCustomStickerRuntime;
+import com.akshaykadam.pixelboard.extension.stickers.GboardCustomStickersFeature;
 import com.akshaykadam.pixelboard.extension.updater.PixelBoardUpdateFeature;
 import com.akshaykadam.pixelboard.extension.updater.PixelBoardUpdateManager;
 
@@ -2957,6 +2959,26 @@ public final class GboardPatchesSettingsActivity extends Activity
                     return true;
                 }
             }
+        } else if (GboardCustomStickerRuntime.ACTION_CUSTOM_STICKERS.equals(intent.getAction())) {
+            standaloneFeatureMode = false;
+            String createMode = intent.getStringExtra(GboardCustomStickerRuntime.EXTRA_CREATE_MODE);
+            intent.removeExtra(GboardCustomStickerRuntime.EXTRA_CREATE_MODE);
+            for (GboardPatchesSettingsContract.Feature feature : features) {
+                if (feature instanceof GboardCustomStickersFeature stickersFeature) {
+                    if (createMode != null && !createMode.isEmpty()) {
+                        stickersFeature.setPendingAutoLaunchMode(createMode);
+                    }
+                    List<GboardPatchesSettingsContract.Feature> path =
+                            Collections.singletonList(feature);
+                    runOnUiThread(() -> {
+                        scrollState.resetForDirectPath(0);
+                        requestScrollPositionOnNextScreenApply(0);
+                        applyOrchestration(settingsOrchestrator.accept(
+                                GboardPatchesSettingsOrchestrator.Event.replacePath(path)));
+                    });
+                    return true;
+                }
+            }
         } else {
             standaloneFeatureMode = false;
         }
@@ -3202,6 +3224,24 @@ public final class GboardPatchesSettingsActivity extends Activity
                         renderCurrentScreenSafely();
                     }
                 }));
+
+        GboardCustomStickersFeature customStickersFeature = null;
+        if (features != null) {
+            for (GboardPatchesSettingsContract.Feature feature : features) {
+                if (feature instanceof GboardCustomStickersFeature found) {
+                    customStickersFeature = found;
+                    break;
+                }
+            }
+        }
+        final GboardCustomStickersFeature targetStickersFeature = customStickersFeature != null
+                ? customStickersFeature
+                : new GboardCustomStickersFeature(context);
+        rows.add(new GboardPatchesSettingsContract.NavigationRow(
+                targetStickersFeature.getEntryTitle(),
+                targetStickersFeature.getEntrySummary(),
+                true,
+                () -> targetStickersFeature.openRootEntry(this)));
 
         List<GboardPatchesSettingsContract.Section> sections =
                 new ArrayList<GboardPatchesSettingsContract.Section>();

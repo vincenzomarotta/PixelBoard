@@ -2,6 +2,7 @@ rootProject.name = "pixelboard-patches"
 
 pluginManagement {
     repositories {
+        mavenLocal()
         gradlePluginPortal()
         google()
         maven {

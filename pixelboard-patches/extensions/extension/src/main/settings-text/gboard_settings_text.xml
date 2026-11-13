@@ -1143,4 +1143,108 @@
         <translation locale="en">Build Information</translation>
         <translation locale="ar">معلومات البناء</translation>
     </string>
+    <string name="gboard_patches_custom_stickers_title">
+        <translation locale="en">Custom Stickers</translation>
+        <translation locale="ar">ملصقات مخصصة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_summary">
+        <translation locale="en">Create custom stickers from images (with background removal) or animated GIFs</translation>
+        <translation locale="ar">إنشاء ملصقات مخصصة من الصور (مع إزالة الخلفية) أو صور GIF المتحركة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_header_summary">
+        <translation locale="en">Create, manage, and insert custom image &amp; GIF stickers</translation>
+        <translation locale="ar">إنشاء وإدارة وإدراج ملصقات الصور وGIF المخصصة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_enabled_title">
+        <translation locale="en">Enable Custom Stickers</translation>
+        <translation locale="ar">تفعيل الملصقات المخصصة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_enabled_summary">
+        <translation locale="en">Allow creating and inserting custom image &amp; GIF stickers in PixelBoard</translation>
+        <translation locale="ar">السماح بإنشاء وإدراج ملصقات الصور وGIF المخصصة في PixelBoard</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_features_menu_title">
+        <translation locale="en">Show in keyboard Features Menu</translation>
+        <translation locale="ar">الإظهار في قائمة ميزات لوحة المفاتيح</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_features_menu_summary">
+        <translation locale="en">Show a quick Custom Stickers button inside the keyboard Features Menu</translation>
+        <translation locale="ar">إظهار زر سريع للملصقات المخصصة داخل قائمة ميزات لوحة المفاتيح</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_auto_bg_title">
+        <translation locale="en">Auto-remove background for images</translation>
+        <translation locale="ar">إزالة الخلفية تلقائياً للصور</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_auto_bg_summary">
+        <translation locale="en">Automatically remove background when creating a sticker from an image</translation>
+        <translation locale="ar">إزالة الخلفية تلقائياً عند إنشاء ملصق من صورة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_outline_title">
+        <translation locale="en">Add white sticker border</translation>
+        <translation locale="ar">إضافة إطار أبيض للملصق</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_outline_summary">
+        <translation locale="en">Add a classic die-cut white outline around transparent sticker cutouts</translation>
+        <translation locale="ar">إضافة إطار أبيض كلاسيكي حول الملصقات المفرغة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_tolerance_title">
+        <translation locale="en">Background removal sensitivity</translation>
+        <translation locale="ar">حساسية إزالة الخلفية</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_tolerance_summary">
+        <translation locale="en">Color matching tolerance when removing image or GIF backgrounds</translation>
+        <translation locale="ar">تفاوت مطابقة الألوان عند إزالة خلفيات الصور أو GIF</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_create_image_title">
+        <translation locale="en">Create Sticker from Image</translation>
+        <translation locale="ar">إنشاء ملصق من صورة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_create_image_summary">
+        <translation locale="en">Import a photo or image, remove its background, and save as a sticker</translation>
+        <translation locale="ar">استيراد صورة وإزالة خلفيتها وحفظها كملصق</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_create_gif_title">
+        <translation locale="en">Create Sticker from GIF</translation>
+        <translation locale="ar">إنشاء ملصق من GIF</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_create_gif_summary">
+        <translation locale="en">Import an animated GIF (with optional background removal) as a sticker</translation>
+        <translation locale="ar">استيراد صورة GIF متحركة (مع إزالة اختيارية للخلفية) كملصق</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_section_create">
+        <translation locale="en">Sticker Studio</translation>
+        <translation locale="ar">استوديو الملصقات</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_section_library">
+        <translation locale="en">Sticker Library</translation>
+        <translation locale="ar">مكتبة الملصقات</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_section_preferences">
+        <translation locale="en">Sticker Preferences</translation>
+        <translation locale="ar">تفضيلات الملصقات</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_empty_title">
+        <translation locale="en">No custom stickers yet</translation>
+        <translation locale="ar">لا توجد ملصقات مخصصة بعد</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_empty_summary">
+        <translation locale="en">Tap \'Create Sticker from Image\' or \'Create Sticker from GIF\' above to build your sticker pack.</translation>
+        <translation locale="ar">اضغط على \'إنشاء ملصق من صورة\' أو \'إنشاء ملصق من GIF\' أعلاه لبناء حزمة الملصقات الخاصة بك.</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_clear_all_title">
+        <translation locale="en">Delete all custom stickers</translation>
+        <translation locale="ar">حذف جميع الملصقات المخصصة</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_clear_all_summary">
+        <translation locale="en">Permanently remove all saved custom stickers and GIFs from device storage</translation>
+        <translation locale="ar">إزالة جميع الملصقات وصور GIF المخصصة المحفوظة نهائياً من تخزين الجهاز</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_clear_all_confirm_title">
+        <translation locale="en">Delete all custom stickers?</translation>
+        <translation locale="ar">هل تريد حذف جميع الملصقات المخصصة؟</translation>
+    </string>
+    <string name="gboard_patches_custom_stickers_clear_all_confirm_message">
+        <translation locale="en">This will permanently delete all saved custom stickers and GIFs.</translation>
+        <translation locale="ar">سيؤدي هذا إلى حذف جميع الملصقات وصور GIF المخصصة المحفوظة نهائياً.</translation>
+    </string>
 </settings-text>
