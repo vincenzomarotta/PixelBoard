@@ -99,6 +99,10 @@ public final class GboardFeaturesMenuAccessibilityRuntime {
         if (root == null || root.getVisibility() != View.VISIBLE) {
             return null;
         }
+        if (com.akshaykadam.pixelboard.extension.stickers.GboardCustomStickerRuntime.STICKER_BAR_VIEW_TAG
+                .equals(root.getTag())) {
+            return null;
+        }
         if (root.getImportantForAccessibility() == View.IMPORTANT_FOR_ACCESSIBILITY_NO ||
             root.getImportantForAccessibility() == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) {
             return null;

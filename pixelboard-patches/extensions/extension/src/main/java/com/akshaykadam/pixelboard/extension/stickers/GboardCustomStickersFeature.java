@@ -1,3 +1,10 @@
+/**
+ * PixelBoard - Gboard Enhancement Mod
+ *
+ * Maintained and customized by Akshay Kadam (@Akshayykadam)
+ * Repository: https://github.com/Akshayykadam/PixelBoard
+ * Licensed under the GNU General Public License v3.0 (GPLv3)
+ */
 package com.akshaykadam.pixelboard.extension.stickers;
 
 import android.app.AlertDialog;
@@ -14,11 +21,14 @@ import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.AnimatedImageDrawable;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.text.InputType;
 import android.text.TextUtils;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -29,8 +39,6 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.SeekBar;
-import android.widget.Switch;
 import android.widget.TextView;
 
 import com.akshaykadam.pixelboard.extension.R;
@@ -52,22 +60,19 @@ import java.util.Locale;
  * and animated GIFs (with solid background transparency).
  */
 public final class GboardCustomStickersFeature implements GboardPatchesSettingsContract.Feature {
+    private static final String TAG = "PixelBoardStickers";
 
     private static final String[] IMAGE_MIME_TYPES = new String[] {
-            "image/png",
-            "image/jpeg",
-            "image/webp",
-            "image/gif",
             "image/*"
     };
 
     private static final String[] GIF_MIME_TYPES = new String[] {
-            "image/gif",
-            "image/*"
+            "image/gif"
     };
 
     private final Context appContext;
     private volatile String pendingAutoLaunchMode;
+    private volatile GboardPatchesSettingsContract.FeatureHost latestHost;
 
     public GboardCustomStickersFeature(Context context) {
         this.appContext = context == null ? null : context.getApplicationContext();
@@ -75,6 +80,22 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
 
     public void setPendingAutoLaunchMode(String mode) {
         this.pendingAutoLaunchMode = mode;
+    }
+
+    private GboardPatchesSettingsContract.FeatureHost resolveActiveHost(
+            GboardPatchesSettingsContract.FeatureHost candidate) {
+        if (latestHost != null) {
+            return latestHost;
+        }
+        return candidate;
+    }
+
+    private Context resolveContext(GboardPatchesSettingsContract.FeatureHost host) {
+        GboardPatchesSettingsContract.FeatureHost active = resolveActiveHost(host);
+        if (active != null && active.getContext() != null) {
+            return active.getContext();
+        }
+        return appContext;
     }
 
     @Override
@@ -101,6 +122,9 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
 
     @Override
     public void onVisible(GboardPatchesSettingsContract.FeatureHost host) {
+        if (host != null) {
+            latestHost = host;
+        }
         String launchMode = pendingAutoLaunchMode;
         pendingAutoLaunchMode = null;
         if (launchMode == null || host == null) {
@@ -116,7 +140,10 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
     @Override
     public GboardPatchesSettingsContract.Screen buildScreen(
             GboardPatchesSettingsContract.FeatureHost host) {
-        Context context = host != null && host.getContext() != null ? host.getContext() : appContext;
+        if (host != null) {
+            latestHost = host;
+        }
+        Context context = resolveContext(host);
         SharedPreferences prefs = GboardCustomStickerSettings.preferences(context);
         if (prefs != null) {
             GboardCustomStickerSettings.ensureDefaults(prefs);
@@ -152,12 +179,12 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_create_image_title),
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_create_image_summary),
                 true,
-                () -> promptImportImageSticker(host)));
+                () -> promptImportImageSticker(resolveActiveHost(host))));
         studioRows.add(new GboardPatchesSettingsContract.CommandRow(
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_create_gif_title),
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_create_gif_summary),
                 true,
-                () -> promptImportGifSticker(host)));
+                () -> promptImportGifSticker(resolveActiveHost(host))));
 
         // 2. Sticker Library Section
         List<GboardPatchesSettingsContract.Row> libraryRows =
@@ -170,11 +197,14 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                     false));
         } else {
             for (final CustomStickerItem item : stickers) {
-                libraryRows.add(new GboardPatchesSettingsContract.NavigationRow(
+                Drawable thumbDrawable = loadRowThumbnailDrawable(context, item);
+                libraryRows.add(new GboardPatchesSettingsContract.CommandRow(
                         displayTitleFor(item),
-                        item.getFormattedSummary(),
+                        item.getFormattedSummary() + " • Tap to send or edit cutout",
                         true,
-                        () -> showStickerActionsDialog(host, item)));
+                        () -> showStickerActionsDialog(resolveActiveHost(host), item),
+                        null,
+                        thumbDrawable));
             }
         }
 
@@ -188,7 +218,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                 enabled,
                 value -> {
                     GboardCustomStickerSettings.writeEnabled(prefs, value);
-                    GboardPatchesSettingsContract.refresh(host);
+                    GboardPatchesSettingsContract.refresh(resolveActiveHost(host));
                 }));
         prefRows.add(new GboardPatchesSettingsContract.ToggleRow(
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_features_menu_title),
@@ -197,7 +227,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                 showInMenu,
                 value -> {
                     GboardCustomStickerSettings.writeShowInFeaturesMenu(prefs, value);
-                    GboardPatchesSettingsContract.refresh(host);
+                    GboardPatchesSettingsContract.refresh(resolveActiveHost(host));
                 }));
         prefRows.add(new GboardPatchesSettingsContract.ToggleRow(
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_auto_bg_title),
@@ -206,7 +236,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                 autoRemoveBg,
                 value -> {
                     GboardCustomStickerSettings.writeAutoRemoveBg(prefs, value);
-                    GboardPatchesSettingsContract.refresh(host);
+                    GboardPatchesSettingsContract.refresh(resolveActiveHost(host));
                 }));
         prefRows.add(new GboardPatchesSettingsContract.ToggleRow(
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_outline_title),
@@ -215,22 +245,22 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                 outlineEnabled,
                 value -> {
                     GboardCustomStickerSettings.writeOutlineEnabled(prefs, value);
-                    GboardPatchesSettingsContract.refresh(host);
+                    GboardPatchesSettingsContract.refresh(resolveActiveHost(host));
                 }));
         prefRows.add(new GboardPatchesSettingsContract.SelectorRow(
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_tolerance_title),
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_tolerance_summary),
                 GboardCustomStickerSettings.formatToleranceLabel(tolerance),
                 enabled,
-                () -> showToleranceSelectorDialog(host, prefs, tolerance)));
+                () -> showToleranceSelectorDialog(resolveActiveHost(host), prefs, tolerance)));
         prefRows.add(new GboardPatchesSettingsContract.ToggleRow(
-                "Copy sticker to clipboard on send",
-                "Also copy the sticker URI to the clipboard when inserting into an app",
+                "Copy sticker to clipboard on create & send",
+                "Automatically place custom stickers into Gboard's Clipboard & Suggestion Strip for 1-tap pasting",
                 enabled,
                 copyToClipboard,
                 value -> {
                     GboardCustomStickerSettings.writeCopyToClipboardOnSend(prefs, value);
-                    GboardPatchesSettingsContract.refresh(host);
+                    GboardPatchesSettingsContract.refresh(resolveActiveHost(host));
                 }));
 
         if (!stickers.isEmpty()) {
@@ -240,8 +270,9 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                     true,
                     () -> {
                         GboardCustomStickerRepository.clearAllStickers(context);
-                        GboardPatchesSettingsContract.showMessage(host, "All custom stickers deleted.");
-                        GboardPatchesSettingsContract.refresh(host);
+                        GboardPatchesSettingsContract.showMessage(
+                                resolveActiveHost(host), "All custom stickers deleted.");
+                        GboardPatchesSettingsContract.refresh(resolveActiveHost(host));
                     },
                     GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_clear_all_confirm_title),
                     GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_clear_all_confirm_message)));
@@ -268,6 +299,38 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                 sections);
     }
 
+    private static Drawable loadRowThumbnailDrawable(Context context, CustomStickerItem item) {
+        if (context == null || item == null) {
+            return null;
+        }
+        try {
+            File file = GboardCustomStickerRepository.getStickerFile(context, item.getFileName());
+            if (file == null || !file.isFile()) {
+                return null;
+            }
+            int sizePx = Math.max(64, dp(context, 44));
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+            int sample = 1;
+            int maxDim = Math.max(bounds.outWidth, bounds.outHeight);
+            while (maxDim / sample > sizePx * 2) {
+                sample *= 2;
+            }
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = sample;
+            opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            Bitmap decoded = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+            if (decoded == null) {
+                return null;
+            }
+            Bitmap scaled = Bitmap.createScaledBitmap(decoded, sizePx, sizePx, true);
+            return new BitmapDrawable(context.getResources(), scaled);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private static String displayTitleFor(CustomStickerItem item) {
         if (item == null) {
             return "";
@@ -291,7 +354,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
         int imageCount = stickers.size() - gifCount;
         return String.format(
                 Locale.US,
-                "%d total (%d PNG, %d GIF • %d with background removed • %s)",
+                "%d saved (%d PNG, %d GIF • %d with cutout • %s) • Available in Keyboard Features Menu & Clipboard",
                 stickers.size(),
                 imageCount,
                 gifCount,
@@ -303,10 +366,11 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             GboardPatchesSettingsContract.FeatureHost host,
             SharedPreferences prefs,
             int currentTolerance) {
-        if (host == null) {
+        GboardPatchesSettingsContract.FeatureHost activeHost = resolveActiveHost(host);
+        if (activeHost == null) {
             return;
         }
-        Context context = host.getContext() != null ? host.getContext() : appContext;
+        Context context = resolveContext(activeHost);
         String[] labels = new String[] {
                 "Low (18%) — Strict edge matching",
                 "Medium (32%) — Recommended default",
@@ -315,104 +379,211 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
         };
         String[] values = new String[] { "18", "32", "48", "64" };
         GboardPatchesSettingsContract.showChoiceDialog(
-                host,
+                activeHost,
                 GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_tolerance_title),
                 labels,
                 values,
                 Integer.toString(currentTolerance),
                 "Custom (1–100)...",
                 () -> GboardPatchesSettingsContract.showPositiveIntegerDialog(
-                        host,
+                        activeHost,
                         GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_tolerance_title),
                         "1 - 100",
                         currentTolerance,
                         val -> {
                             GboardCustomStickerSettings.writeBgTolerance(prefs, val);
-                            GboardPatchesSettingsContract.refresh(host);
+                            GboardPatchesSettingsContract.refresh(activeHost);
                         }),
                 selected -> {
                     try {
                         int parsed = Integer.parseInt(selected);
                         GboardCustomStickerSettings.writeBgTolerance(prefs, parsed);
-                        GboardPatchesSettingsContract.refresh(host);
+                        GboardPatchesSettingsContract.refresh(activeHost);
                     } catch (NumberFormatException ignored) {
                     }
                 });
     }
 
     public void promptImportImageSticker(GboardPatchesSettingsContract.FeatureHost host) {
-        if (host == null) {
+        final GboardPatchesSettingsContract.FeatureHost requestHost = resolveActiveHost(host);
+        if (requestHost == null) {
             return;
         }
-        GboardPatchesSettingsContract.openBinaryDocument(host, IMAGE_MIME_TYPES, document -> {
+        GboardPatchesSettingsContract.openBinaryDocument(requestHost, IMAGE_MIME_TYPES, document -> {
+            GboardPatchesSettingsContract.FeatureHost activeHost = resolveActiveHost(requestHost);
             if (document == null || document.getData() == null || document.getData().length == 0) {
-                GboardPatchesSettingsContract.showMessage(host, "Failed to read image file.");
+                GboardPatchesSettingsContract.showMessage(activeHost, "Failed to read selected image.");
                 return;
             }
-            byte[] data = document.getData();
-            String baseName = stripExtension(document.getDisplayName(), "Sticker");
-            if (GboardStickerImageProcessor.isGifBytes(data)) {
-                showGifStickerStudioDialog(host, baseName, data);
-            } else {
-                showImageStickerStudioDialog(host, baseName, data);
-            }
+            handleImportedMediaBytes(
+                    activeHost,
+                    stripExtension(document.getDisplayName(), "Sticker"),
+                    document.getData());
         });
     }
 
     public void promptImportGifSticker(GboardPatchesSettingsContract.FeatureHost host) {
-        if (host == null) {
+        final GboardPatchesSettingsContract.FeatureHost requestHost = resolveActiveHost(host);
+        if (requestHost == null) {
             return;
         }
-        GboardPatchesSettingsContract.openBinaryDocument(host, GIF_MIME_TYPES, document -> {
+        GboardPatchesSettingsContract.openBinaryDocument(requestHost, GIF_MIME_TYPES, document -> {
+            GboardPatchesSettingsContract.FeatureHost activeHost = resolveActiveHost(requestHost);
             if (document == null || document.getData() == null || document.getData().length == 0) {
-                GboardPatchesSettingsContract.showMessage(host, "Failed to read GIF file.");
+                GboardPatchesSettingsContract.showMessage(activeHost, "Failed to read selected GIF.");
                 return;
             }
-            byte[] data = document.getData();
-            String baseName = stripExtension(document.getDisplayName(), "GIF Sticker");
-            if (GboardStickerImageProcessor.isGifBytes(data)) {
-                showGifStickerStudioDialog(host, baseName, data);
-            } else {
-                showImageStickerStudioDialog(host, baseName, data);
-            }
+            handleImportedMediaBytes(
+                    activeHost,
+                    stripExtension(document.getDisplayName(), "GIF Sticker"),
+                    document.getData());
         });
+    }
+
+    /**
+     * Immediately creates and saves the custom sticker using the user's current settings,
+     * copies it to Gboard's clipboard so it is ready to paste right away, refreshes the
+     * Sticker Library screen, and opens the Sticker Studio dialog for optional live refinement.
+     */
+    private void handleImportedMediaBytes(
+            final GboardPatchesSettingsContract.FeatureHost host,
+            final String baseName,
+            final byte[] data) {
+        final GboardPatchesSettingsContract.FeatureHost activeHost = resolveActiveHost(host);
+        final Context context = resolveContext(activeHost);
+        if (context == null || data == null || data.length == 0) {
+            return;
+        }
+
+        if (GboardStickerImageProcessor.isGifBytes(data)) {
+            CustomStickerItem autoSaved = null;
+            try {
+                SharedPreferences prefs = GboardCustomStickerSettings.preferences(context);
+                int tolerance = GboardCustomStickerSettings.readBgTolerance(prefs);
+                autoSaved = GboardCustomStickerRepository.createStickerFromGifBytes(
+                        context, data, baseName, false, tolerance, null);
+                if (autoSaved != null) {
+                    copyStickerToClipboardIfEnabled(context, autoSaved);
+                    GboardPatchesSettingsContract.refresh(activeHost);
+                    GboardPatchesSettingsContract.showMessage(
+                            activeHost,
+                            "GIF sticker \"" + autoSaved.getName() + "\" created & copied to keyboard clipboard!");
+                }
+            } catch (Throwable t) {
+                try {
+                    Log.w(TAG, "Auto-save GIF sticker failed", t);
+                } catch (Throwable ignored) {
+                }
+            }
+            final String existingId = autoSaved != null ? autoSaved.getId() : null;
+            showGifStickerStudioDialog(activeHost, baseName, data, existingId);
+        } else {
+            CustomStickerItem autoSaved = null;
+            try {
+                SharedPreferences prefs = GboardCustomStickerSettings.preferences(context);
+                boolean removeBg = GboardCustomStickerSettings.readAutoRemoveBg(prefs);
+                boolean outline = GboardCustomStickerSettings.readOutlineEnabled(prefs);
+                int tolerance = GboardCustomStickerSettings.readBgTolerance(prefs);
+                GboardStickerImageProcessor.StickerOptions opts =
+                        new GboardStickerImageProcessor.StickerOptions(
+                                removeBg,
+                                tolerance,
+                                true,
+                                null,
+                                outline,
+                                Color.WHITE,
+                                GboardStickerImageProcessor.DEFAULT_OUTLINE_RADIUS_PX,
+                                true,
+                                GboardStickerImageProcessor.DEFAULT_MAX_STICKER_DIMENSION_PX);
+                autoSaved = GboardCustomStickerRepository.createStickerFromImageBytes(
+                        context, data, baseName, opts);
+                if (autoSaved != null) {
+                    copyStickerToClipboardIfEnabled(context, autoSaved);
+                    GboardPatchesSettingsContract.refresh(activeHost);
+                    GboardPatchesSettingsContract.showMessage(
+                            activeHost,
+                            "Sticker \"" + autoSaved.getName() + "\" created & copied to keyboard clipboard!");
+                }
+            } catch (Throwable t) {
+                try {
+                    Log.w(TAG, "Auto-save image sticker failed", t);
+                } catch (Throwable ignored) {
+                }
+            }
+            final String existingId = autoSaved != null ? autoSaved.getId() : null;
+            showImageStickerStudioDialog(activeHost, baseName, data, existingId);
+        }
+    }
+
+    private static void copyStickerToClipboardIfEnabled(Context context, CustomStickerItem item) {
+        if (context == null || item == null) {
+            return;
+        }
+        SharedPreferences prefs = GboardCustomStickerSettings.preferences(context);
+        if (GboardCustomStickerSettings.readCopyToClipboardOnSend(prefs)) {
+            Uri uri = GboardCustomStickerRepository.buildStickerContentUri(context, item);
+            if (uri != null) {
+                GboardCustomStickerRuntime.copyStickerUriToClipboard(context, item, uri);
+            }
+        }
     }
 
     private void showImageStickerStudioDialog(
             final GboardPatchesSettingsContract.FeatureHost host,
             final String initialName,
-            final byte[] rawImageBytes) {
-        if (host == null || rawImageBytes == null) {
+            final byte[] rawImageBytes,
+            final String existingStickerId) {
+        final GboardPatchesSettingsContract.FeatureHost activeHost = resolveActiveHost(host);
+        if (activeHost == null || rawImageBytes == null) {
             return;
         }
-        final Context context = host.getContext();
+        final Context context = resolveContext(activeHost);
         if (context == null) {
             return;
         }
-        final Bitmap decodedSource = BitmapFactory.decodeByteArray(rawImageBytes, 0, rawImageBytes.length);
-        if (decodedSource == null || decodedSource.getWidth() <= 0 || decodedSource.getHeight() <= 0) {
-            GboardPatchesSettingsContract.showMessage(host, "Unable to decode selected image.");
+        final Bitmap studioSource = GboardStickerImageProcessor.decodeBoundedBitmap(
+                rawImageBytes, GboardStickerImageProcessor.DEFAULT_MAX_STICKER_DIMENSION_PX);
+        if (studioSource == null || studioSource.getWidth() <= 0 || studioSource.getHeight() <= 0) {
+            GboardPatchesSettingsContract.showMessage(activeHost, "Unable to decode selected image.");
             return;
         }
 
-        final Bitmap studioSource = scaleDownIfNeeded(decodedSource, 512);
         final SharedPreferences prefs = GboardCustomStickerSettings.preferences(context);
 
-        GboardPatchesSettingsContract.showManagedDialog(host, onDismiss -> {
+        GboardPatchesSettingsContract.showManagedDialog(activeHost, onDismiss -> {
             ScrollView scrollView = new ScrollView(context);
             scrollView.setFillViewport(true);
 
             LinearLayout root = new LinearLayout(context);
             root.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(context, 20);
-            root.setPadding(pad, dp(context, 12), pad, dp(context, 8));
+            int pad = dp(context, 18);
+            root.setPadding(pad, dp(context, 12), pad, dp(context, 12));
             scrollView.addView(root);
+
+            if (existingStickerId != null) {
+                TextView savedBanner = new TextView(context);
+                savedBanner.setText("✓ Saved to Sticker Library & Keyboard Clipboard — customize cutout below");
+                savedBanner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+                savedBanner.setTextColor(0xFF81C995);
+                savedBanner.setTypeface(Typeface.DEFAULT_BOLD);
+                savedBanner.setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8));
+                GradientDrawable bannerBg = new GradientDrawable();
+                bannerBg.setColor(0x2281C995);
+                bannerBg.setCornerRadius(dp(context, 12));
+                savedBanner.setBackground(bannerBg);
+                LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                bannerLp.bottomMargin = dp(context, 10);
+                savedBanner.setLayoutParams(bannerLp);
+                root.addView(savedBanner);
+            }
 
             FrameLayout previewFrame = new FrameLayout(context);
             previewFrame.setBackground(new CheckerboardDrawable(dp(context, 10), dp(context, 16)));
             LinearLayout.LayoutParams previewFrameLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    dp(context, 220));
+                    dp(context, 210));
             previewFrameLp.bottomMargin = dp(context, 8);
             previewFrame.setLayoutParams(previewFrameLp);
 
@@ -450,11 +621,11 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             LinearLayout.LayoutParams hintRowLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
-            hintRowLp.bottomMargin = dp(context, 12);
+            hintRowLp.bottomMargin = dp(context, 10);
             colorHintRow.setLayoutParams(hintRowLp);
 
             final TextView colorModeLabel = new TextView(context);
-            colorModeLabel.setText("Tip: Tap background in preview to sample a target color");
+            colorModeLabel.setText("Tip: Tap background in preview to pick a specific color to remove");
             colorModeLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
             colorModeLabel.setTextColor(0xFF8E918F);
             colorModeLabel.setLayoutParams(new LinearLayout.LayoutParams(
@@ -484,7 +655,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
-            nameLp.bottomMargin = dp(context, 10);
+            nameLp.bottomMargin = dp(context, 8);
             nameInput.setLayoutParams(nameLp);
             root.addView(nameInput);
 
@@ -503,113 +674,91 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             final GboardStickerImageProcessor.ProcessedStickerResult[] latestResult =
                     new GboardStickerImageProcessor.ProcessedStickerResult[1];
 
-            final Switch removeBgSwitch = addStudioSwitchRow(
+            final StudioToggleControl[] interiorControlRef = new StudioToggleControl[1];
+            final TextView toleranceValueLabel = new TextView(context);
+
+            final Runnable updatePreview = () -> {
+                try {
+                    toleranceValueLabel.setText("Background sensitivity: " + toleranceState[0] + "%");
+                    GboardStickerImageProcessor.StickerOptions opts =
+                            new GboardStickerImageProcessor.StickerOptions(
+                                    removeBgState[0],
+                                    toleranceState[0],
+                                    !interiorHolesState[0],
+                                    manualColorState[0],
+                                    outlineState[0],
+                                    Color.WHITE,
+                                    GboardStickerImageProcessor.DEFAULT_OUTLINE_RADIUS_PX,
+                                    trimState[0],
+                                    GboardStickerImageProcessor.DEFAULT_MAX_STICKER_DIMENSION_PX);
+                    GboardStickerImageProcessor.ProcessedStickerResult processed =
+                            GboardStickerImageProcessor.processStaticBitmap(studioSource, opts);
+                    if (processed != null && processed.getPreviewBitmap() != null) {
+                        latestResult[0] = processed;
+                        previewImageView.setImageBitmap(processed.getPreviewBitmap());
+                        badgeOverlay.setText(processed.getWidth() + "×" + processed.getHeight()
+                                + (removeBgState[0] ? " • Cutout" : " • Full")
+                                + (outlineState[0] ? " • Border" : ""));
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "Failed to update sticker preview", t);
+                }
+            };
+
+            final StudioToggleControl removeBgControl = addSafeToggleRow(
                     context,
                     root,
                     "Remove background",
-                    "Automatically isolate foreground subject",
-                    removeBgState[0]);
+                    "Isolate foreground subject onto transparent canvas",
+                    removeBgState[0],
+                    checked -> {
+                        removeBgState[0] = checked;
+                        if (interiorControlRef[0] != null) {
+                            interiorControlRef[0].setEnabled(checked);
+                        }
+                        updatePreview.run();
+                    });
 
-            final Switch interiorHolesSwitch = addStudioSwitchRow(
+            interiorControlRef[0] = addSafeToggleRow(
                     context,
                     root,
                     "Remove interior holes",
                     "Also clear matching background colors inside closed loops",
-                    interiorHolesState[0]);
-            interiorHolesSwitch.setEnabled(removeBgState[0]);
+                    interiorHolesState[0],
+                    checked -> {
+                        interiorHolesState[0] = checked;
+                        updatePreview.run();
+                    });
+            interiorControlRef[0].setEnabled(removeBgState[0]);
 
-            final TextView toleranceLabel = new TextView(context);
-            toleranceLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
-            toleranceLabel.setTypeface(Typeface.DEFAULT_BOLD);
-            toleranceLabel.setPadding(0, dp(context, 6), 0, dp(context, 2));
-            root.addView(toleranceLabel);
+            toleranceValueLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+            toleranceValueLabel.setTypeface(Typeface.DEFAULT_BOLD);
+            toleranceValueLabel.setPadding(0, dp(context, 6), 0, dp(context, 4));
+            root.addView(toleranceValueLabel);
 
-            final SeekBar toleranceSeekBar = new SeekBar(context);
-            toleranceSeekBar.setMax(85);
-            toleranceSeekBar.setProgress(Math.max(5, Math.min(85, toleranceState[0])));
-            toleranceSeekBar.setEnabled(removeBgState[0]);
-            LinearLayout.LayoutParams seekLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            seekLp.bottomMargin = dp(context, 6);
-            toleranceSeekBar.setLayoutParams(seekLp);
-            root.addView(toleranceSeekBar);
+            addSensitivityPresetBar(context, root, toleranceState, updatePreview);
 
-            final Switch outlineSwitch = addStudioSwitchRow(
+            addSafeToggleRow(
                     context,
                     root,
                     "Add white sticker border",
                     "Draw a smooth die-cut outline around the sticker",
-                    outlineState[0]);
+                    outlineState[0],
+                    checked -> {
+                        outlineState[0] = checked;
+                        updatePreview.run();
+                    });
 
-            final Switch trimSwitch = addStudioSwitchRow(
+            addSafeToggleRow(
                     context,
                     root,
                     "Auto-trim transparent margins",
                     "Crop empty space and maximize sticker size",
-                    trimState[0]);
-
-            final Runnable updatePreview = () -> {
-                toleranceLabel.setText("Background sensitivity: " + toleranceState[0] + "%");
-                GboardStickerImageProcessor.StickerOptions opts =
-                        new GboardStickerImageProcessor.StickerOptions(
-                                removeBgState[0],
-                                toleranceState[0],
-                                !interiorHolesState[0],
-                                manualColorState[0],
-                                outlineState[0],
-                                Color.WHITE,
-                                GboardStickerImageProcessor.DEFAULT_OUTLINE_RADIUS_PX,
-                                trimState[0],
-                                GboardStickerImageProcessor.DEFAULT_MAX_STICKER_DIMENSION_PX);
-                GboardStickerImageProcessor.ProcessedStickerResult processed =
-                        GboardStickerImageProcessor.processStaticBitmap(studioSource, opts);
-                if (processed != null && processed.getPreviewBitmap() != null) {
-                    latestResult[0] = processed;
-                    previewImageView.setImageBitmap(processed.getPreviewBitmap());
-                    badgeOverlay.setText(processed.getWidth() + "×" + processed.getHeight()
-                            + (removeBgState[0] ? " • Cutout" : " • Full")
-                            + (outlineState[0] ? " • Border" : ""));
-                }
-            };
-
-            removeBgSwitch.setOnCheckedChangeListener((btn, checked) -> {
-                removeBgState[0] = checked;
-                interiorHolesSwitch.setEnabled(checked);
-                toleranceSeekBar.setEnabled(checked);
-                updatePreview.run();
-            });
-            interiorHolesSwitch.setOnCheckedChangeListener((btn, checked) -> {
-                interiorHolesState[0] = checked;
-                updatePreview.run();
-            });
-            outlineSwitch.setOnCheckedChangeListener((btn, checked) -> {
-                outlineState[0] = checked;
-                updatePreview.run();
-            });
-            trimSwitch.setOnCheckedChangeListener((btn, checked) -> {
-                trimState[0] = checked;
-                updatePreview.run();
-            });
-            toleranceSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override
-                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                    toleranceState[0] = Math.max(5, progress);
-                    toleranceLabel.setText("Background sensitivity: " + toleranceState[0] + "%");
-                    if (fromUser) {
+                    trimState[0],
+                    checked -> {
+                        trimState[0] = checked;
                         updatePreview.run();
-                    }
-                }
-
-                @Override
-                public void onStartTrackingTouch(SeekBar seekBar) {
-                }
-
-                @Override
-                public void onStopTrackingTouch(SeekBar seekBar) {
-                    updatePreview.run();
-                }
-            });
+                    });
 
             previewImageView.setOnTouchListener((v, event) -> {
                 if (event.getAction() == MotionEvent.ACTION_UP && studioSource != null) {
@@ -625,7 +774,10 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                         int sampled = studioSource.getPixel(bx, by);
                         manualColorState[0] = Integer.valueOf(sampled);
                         removeBgState[0] = true;
-                        removeBgSwitch.setChecked(true);
+                        removeBgControl.setChecked(true);
+                        if (interiorControlRef[0] != null) {
+                            interiorControlRef[0].setEnabled(true);
+                        }
                         String hex = String.format(Locale.US, "#%06X", (0xFFFFFF & sampled));
                         colorModeLabel.setText("Target background color: " + hex);
                         resetColorButton.setVisibility(View.VISIBLE);
@@ -637,53 +789,96 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
 
             resetColorButton.setOnClickListener(v -> {
                 manualColorState[0] = null;
-                colorModeLabel.setText("Tip: Tap background in preview to sample a target color");
+                colorModeLabel.setText("Tip: Tap background in preview to pick a specific color to remove");
                 resetColorButton.setVisibility(View.GONE);
                 updatePreview.run();
             });
 
             updatePreview.run();
 
+            final AlertDialog[] dialogRef = new AlertDialog[1];
+            final Runnable saveAction = () -> {
+                GboardStickerImageProcessor.ProcessedStickerResult result = latestResult[0];
+                if (result == null) {
+                    GboardStickerImageProcessor.StickerOptions opts =
+                            new GboardStickerImageProcessor.StickerOptions(
+                                    removeBgState[0],
+                                    toleranceState[0],
+                                    !interiorHolesState[0],
+                                    manualColorState[0],
+                                    outlineState[0],
+                                    Color.WHITE,
+                                    GboardStickerImageProcessor.DEFAULT_OUTLINE_RADIUS_PX,
+                                    trimState[0],
+                                    GboardStickerImageProcessor.DEFAULT_MAX_STICKER_DIMENSION_PX);
+                    result = GboardStickerImageProcessor.processStaticBitmap(studioSource, opts);
+                }
+                String chosenName = nameInput.getText() == null
+                        ? initialName
+                        : nameInput.getText().toString().trim();
+                if (chosenName.isEmpty()) {
+                    chosenName = initialName;
+                }
+                try {
+                    CustomStickerItem saved = existingStickerId != null
+                            ? GboardCustomStickerRepository.updateProcessedSticker(
+                                    context, existingStickerId, chosenName, result)
+                            : GboardCustomStickerRepository.saveProcessedSticker(
+                                    context, chosenName, result);
+                    if (saved != null) {
+                        copyStickerToClipboardIfEnabled(context, saved);
+                        GboardPatchesSettingsContract.showMessage(
+                                activeHost, "Sticker saved & ready in keyboard!");
+                        GboardPatchesSettingsContract.refresh(activeHost);
+                    }
+                } catch (IOException e) {
+                    GboardPatchesSettingsContract.showMessage(
+                            activeHost, "Failed to save custom sticker.");
+                }
+            };
+
+            View spacer = new View(context);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 10)));
+            root.addView(spacer);
+
+            addActionSheetButton(
+                    context,
+                    root,
+                    "Save Sticker & Copy to Keyboard",
+                    true,
+                    false,
+                    () -> {
+                        saveAction.run();
+                        if (dialogRef[0] != null) {
+                            dialogRef[0].dismiss();
+                        }
+                    });
+
+            if (existingStickerId != null) {
+                addActionSheetButton(
+                        context,
+                        root,
+                        "Delete This Sticker",
+                        false,
+                        true,
+                        () -> {
+                            GboardCustomStickerRepository.deleteSticker(context, existingStickerId);
+                            GboardPatchesSettingsContract.showMessage(activeHost, "Sticker deleted.");
+                            GboardPatchesSettingsContract.refresh(activeHost);
+                            if (dialogRef[0] != null) {
+                                dialogRef[0].dismiss();
+                            }
+                        });
+            }
+
             AlertDialog dialog = new AlertDialog.Builder(context)
                     .setTitle(GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_create_image_title))
                     .setView(scrollView)
-                    .setNegativeButton(GboardSettingsText.get(context, R.string.gboard_patches_dialog_cancel), null)
-                    .setPositiveButton("Save Sticker", (d, which) -> {
-                        GboardStickerImageProcessor.ProcessedStickerResult result = latestResult[0];
-                        if (result == null) {
-                            GboardStickerImageProcessor.StickerOptions opts =
-                                    new GboardStickerImageProcessor.StickerOptions(
-                                            removeBgState[0],
-                                            toleranceState[0],
-                                            !interiorHolesState[0],
-                                            manualColorState[0],
-                                            outlineState[0],
-                                            Color.WHITE,
-                                            GboardStickerImageProcessor.DEFAULT_OUTLINE_RADIUS_PX,
-                                            trimState[0],
-                                            GboardStickerImageProcessor.DEFAULT_MAX_STICKER_DIMENSION_PX);
-                            result = GboardStickerImageProcessor.processStaticBitmap(studioSource, opts);
-                        }
-                        String chosenName = nameInput.getText() == null
-                                ? initialName
-                                : nameInput.getText().toString().trim();
-                        if (chosenName.isEmpty()) {
-                            chosenName = initialName;
-                        }
-                        try {
-                            CustomStickerItem saved = GboardCustomStickerRepository.saveProcessedSticker(
-                                    context, chosenName, result);
-                            if (saved != null) {
-                                GboardPatchesSettingsContract.showMessage(host, "Custom sticker saved!");
-                                GboardPatchesSettingsContract.refresh(host);
-                            } else {
-                                GboardPatchesSettingsContract.showMessage(host, "Failed to save custom sticker.");
-                            }
-                        } catch (IOException e) {
-                            GboardPatchesSettingsContract.showMessage(host, "Failed to save custom sticker.");
-                        }
-                    })
+                    .setNegativeButton(GboardSettingsText.get(context, R.string.gboard_patches_dialog_close), null)
+                    .setPositiveButton("Save Sticker", (d, which) -> saveAction.run())
                     .create();
+            dialogRef[0] = dialog;
             dialog.setOnDismissListener(ignored -> onDismiss.run());
             dialog.show();
             return true;
@@ -693,32 +888,53 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
     private void showGifStickerStudioDialog(
             final GboardPatchesSettingsContract.FeatureHost host,
             final String initialName,
-            final byte[] rawGifBytes) {
-        if (host == null || rawGifBytes == null) {
+            final byte[] rawGifBytes,
+            final String existingStickerId) {
+        final GboardPatchesSettingsContract.FeatureHost activeHost = resolveActiveHost(host);
+        if (activeHost == null || rawGifBytes == null) {
             return;
         }
-        final Context context = host.getContext();
+        final Context context = resolveContext(activeHost);
         if (context == null) {
             return;
         }
         final SharedPreferences prefs = GboardCustomStickerSettings.preferences(context);
 
-        GboardPatchesSettingsContract.showManagedDialog(host, onDismiss -> {
+        GboardPatchesSettingsContract.showManagedDialog(activeHost, onDismiss -> {
             ScrollView scrollView = new ScrollView(context);
             scrollView.setFillViewport(true);
 
             LinearLayout root = new LinearLayout(context);
             root.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(context, 20);
-            root.setPadding(pad, dp(context, 12), pad, dp(context, 8));
+            int pad = dp(context, 18);
+            root.setPadding(pad, dp(context, 12), pad, dp(context, 12));
             scrollView.addView(root);
+
+            if (existingStickerId != null) {
+                TextView savedBanner = new TextView(context);
+                savedBanner.setText("✓ Saved to Sticker Library & Keyboard Clipboard — customize below");
+                savedBanner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+                savedBanner.setTextColor(0xFF81C995);
+                savedBanner.setTypeface(Typeface.DEFAULT_BOLD);
+                savedBanner.setPadding(dp(context, 12), dp(context, 8), dp(context, 12), dp(context, 8));
+                GradientDrawable bannerBg = new GradientDrawable();
+                bannerBg.setColor(0x2281C995);
+                bannerBg.setCornerRadius(dp(context, 12));
+                savedBanner.setBackground(bannerBg);
+                LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT);
+                bannerLp.bottomMargin = dp(context, 10);
+                savedBanner.setLayoutParams(bannerLp);
+                root.addView(savedBanner);
+            }
 
             FrameLayout previewFrame = new FrameLayout(context);
             previewFrame.setBackground(new CheckerboardDrawable(dp(context, 10), dp(context, 16)));
             LinearLayout.LayoutParams previewFrameLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    dp(context, 210));
-            previewFrameLp.bottomMargin = dp(context, 12);
+                    dp(context, 200));
+            previewFrameLp.bottomMargin = dp(context, 10);
             previewFrame.setLayoutParams(previewFrameLp);
 
             final ImageView previewImageView = new ImageView(context);
@@ -772,99 +988,108 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             final GboardStickerImageProcessor.ProcessedStickerResult[] latestGifResult =
                     new GboardStickerImageProcessor.ProcessedStickerResult[1];
 
-            final Switch removeGifBgSwitch = addStudioSwitchRow(
-                    context,
-                    root,
-                    "Make solid GIF background transparent",
-                    "Detects background color in the GIF palette and marks it transparent while keeping animation",
-                    removeGifBgState[0]);
-
             final TextView toleranceLabel = new TextView(context);
-            toleranceLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
-            toleranceLabel.setTypeface(Typeface.DEFAULT_BOLD);
-            toleranceLabel.setPadding(0, dp(context, 6), 0, dp(context, 2));
-            root.addView(toleranceLabel);
-
-            final SeekBar toleranceSeekBar = new SeekBar(context);
-            toleranceSeekBar.setMax(75);
-            toleranceSeekBar.setProgress(Math.max(5, Math.min(75, gifToleranceState[0])));
-            toleranceSeekBar.setEnabled(removeGifBgState[0]);
-            root.addView(toleranceSeekBar);
 
             final Runnable updateGifPreview = () -> {
-                toleranceLabel.setText("Palette color tolerance: " + gifToleranceState[0] + "%");
-                GboardStickerImageProcessor.ProcessedStickerResult processed =
-                        GboardStickerImageProcessor.processGifBytes(
-                                rawGifBytes,
-                                removeGifBgState[0],
-                                gifToleranceState[0],
-                                null);
-                if (processed != null) {
-                    latestGifResult[0] = processed;
-                    bindStickerBytesToImageView(previewImageView, processed.getEncodedBytes(), true);
-                    badgeOverlay.setText("GIF • " + processed.getWidth() + "×" + processed.getHeight()
-                            + (processed.isBackgroundRemoved() ? " • Transparent BG" : " • Original")
-                            + " • " + CustomStickerItem.formatFileSize(processed.getEncodedBytes().length));
-                }
-            };
-
-            removeGifBgSwitch.setOnCheckedChangeListener((btn, checked) -> {
-                removeGifBgState[0] = checked;
-                toleranceSeekBar.setEnabled(checked);
-                updateGifPreview.run();
-            });
-            toleranceSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-                @Override
-                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                    gifToleranceState[0] = Math.max(5, progress);
+                try {
                     toleranceLabel.setText("Palette color tolerance: " + gifToleranceState[0] + "%");
-                }
-
-                @Override
-                public void onStartTrackingTouch(SeekBar seekBar) {
-                }
-
-                @Override
-                public void onStopTrackingTouch(SeekBar seekBar) {
-                    updateGifPreview.run();
-                }
-            });
-
-            updateGifPreview.run();
-
-            AlertDialog dialog = new AlertDialog.Builder(context)
-                    .setTitle(GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_create_gif_title))
-                    .setView(scrollView)
-                    .setNegativeButton(GboardSettingsText.get(context, R.string.gboard_patches_dialog_cancel), null)
-                    .setPositiveButton("Save GIF Sticker", (d, which) -> {
-                        GboardStickerImageProcessor.ProcessedStickerResult result = latestGifResult[0];
-                        if (result == null) {
-                            result = GboardStickerImageProcessor.processGifBytes(
+                    GboardStickerImageProcessor.ProcessedStickerResult processed =
+                            GboardStickerImageProcessor.processGifBytes(
                                     rawGifBytes,
                                     removeGifBgState[0],
                                     gifToleranceState[0],
                                     null);
-                        }
-                        String chosenName = nameInput.getText() == null
-                                ? initialName
-                                : nameInput.getText().toString().trim();
-                        if (chosenName.isEmpty()) {
-                            chosenName = initialName;
-                        }
-                        try {
-                            CustomStickerItem saved = GboardCustomStickerRepository.saveProcessedSticker(
+                    if (processed != null) {
+                        latestGifResult[0] = processed;
+                        bindStickerBytesToImageView(previewImageView, processed.getEncodedBytes(), true);
+                        badgeOverlay.setText("GIF • " + processed.getWidth() + "×" + processed.getHeight()
+                                + (processed.isBackgroundRemoved() ? " • Transparent BG" : " • Original")
+                                + " • " + CustomStickerItem.formatFileSize(processed.getEncodedBytes().length));
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "Failed to update GIF preview", t);
+                }
+            };
+
+            addSafeToggleRow(
+                    context,
+                    root,
+                    "Make solid GIF background transparent",
+                    "Detects background color in the GIF palette and marks it transparent while keeping animation",
+                    removeGifBgState[0],
+                    checked -> {
+                        removeGifBgState[0] = checked;
+                        updateGifPreview.run();
+                    });
+
+            toleranceLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+            toleranceLabel.setTypeface(Typeface.DEFAULT_BOLD);
+            toleranceLabel.setPadding(0, dp(context, 6), 0, dp(context, 4));
+            root.addView(toleranceLabel);
+
+            addSensitivityPresetBar(context, root, gifToleranceState, updateGifPreview);
+
+            updateGifPreview.run();
+
+            final AlertDialog[] dialogRef = new AlertDialog[1];
+            final Runnable saveGifAction = () -> {
+                GboardStickerImageProcessor.ProcessedStickerResult result = latestGifResult[0];
+                if (result == null) {
+                    result = GboardStickerImageProcessor.processGifBytes(
+                            rawGifBytes,
+                            removeGifBgState[0],
+                            gifToleranceState[0],
+                            null);
+                }
+                String chosenName = nameInput.getText() == null
+                        ? initialName
+                        : nameInput.getText().toString().trim();
+                if (chosenName.isEmpty()) {
+                    chosenName = initialName;
+                }
+                try {
+                    CustomStickerItem saved = existingStickerId != null
+                            ? GboardCustomStickerRepository.updateProcessedSticker(
+                                    context, existingStickerId, chosenName, result)
+                            : GboardCustomStickerRepository.saveProcessedSticker(
                                     context, chosenName, result);
-                            if (saved != null) {
-                                GboardPatchesSettingsContract.showMessage(host, "Custom GIF sticker saved!");
-                                GboardPatchesSettingsContract.refresh(host);
-                            } else {
-                                GboardPatchesSettingsContract.showMessage(host, "Failed to save GIF sticker.");
-                            }
-                        } catch (IOException e) {
-                            GboardPatchesSettingsContract.showMessage(host, "Failed to save GIF sticker.");
+                    if (saved != null) {
+                        copyStickerToClipboardIfEnabled(context, saved);
+                        GboardPatchesSettingsContract.showMessage(
+                                activeHost, "GIF sticker saved & ready in keyboard!");
+                        GboardPatchesSettingsContract.refresh(activeHost);
+                    }
+                } catch (IOException e) {
+                    GboardPatchesSettingsContract.showMessage(
+                            activeHost, "Failed to save GIF sticker.");
+                }
+            };
+
+            View spacer = new View(context);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(context, 10)));
+            root.addView(spacer);
+
+            addActionSheetButton(
+                    context,
+                    root,
+                    "Save GIF Sticker & Copy to Keyboard",
+                    true,
+                    false,
+                    () -> {
+                        saveGifAction.run();
+                        if (dialogRef[0] != null) {
+                            dialogRef[0].dismiss();
                         }
-                    })
+                    });
+
+            AlertDialog dialog = new AlertDialog.Builder(context)
+                    .setTitle(GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_create_gif_title))
+                    .setView(scrollView)
+                    .setNegativeButton(GboardSettingsText.get(context, R.string.gboard_patches_dialog_close), null)
+                    .setPositiveButton("Save GIF Sticker", (d, which) -> saveGifAction.run())
                     .create();
+            dialogRef[0] = dialog;
             dialog.setOnDismissListener(ignored -> onDismiss.run());
             dialog.show();
             return true;
@@ -874,10 +1099,11 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
     private void showStickerActionsDialog(
             final GboardPatchesSettingsContract.FeatureHost host,
             final CustomStickerItem item) {
-        if (host == null || item == null) {
+        final GboardPatchesSettingsContract.FeatureHost activeHost = resolveActiveHost(host);
+        if (activeHost == null || item == null) {
             return;
         }
-        final Context context = host.getContext();
+        final Context context = resolveContext(activeHost);
         if (context == null) {
             return;
         }
@@ -888,7 +1114,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
         }
         final byte[] stickerBytes = loadedBytes;
 
-        GboardPatchesSettingsContract.showManagedDialog(host, onDismiss -> {
+        GboardPatchesSettingsContract.showManagedDialog(activeHost, onDismiss -> {
             ScrollView scrollView = new ScrollView(context);
             scrollView.setFillViewport(true);
 
@@ -934,20 +1160,52 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             addActionSheetButton(
                     context,
                     root,
-                    "Insert / Copy to Clipboard",
+                    "Send / Copy to Keyboard Clipboard",
                     true,
                     false,
                     () -> {
                         if (dialogRef[0] != null) {
                             dialogRef[0].dismiss();
                         }
-                        GboardCustomStickerRuntime.commitSticker(context, item);
+                        GboardCustomStickerRuntime.CommitResult res =
+                                GboardCustomStickerRuntime.commitSticker(context, item);
+                        if (res == GboardCustomStickerRuntime.CommitResult.COMMITTED_DIRECTLY) {
+                            GboardPatchesSettingsContract.showMessage(
+                                    activeHost, "Sticker inserted!");
+                        } else {
+                            Uri uri = GboardCustomStickerRepository.buildStickerContentUri(context, item);
+                            GboardCustomStickerRuntime.copyStickerUriToClipboard(context, item, uri);
+                            GboardPatchesSettingsContract.showMessage(
+                                    activeHost,
+                                    "Copied \"" + item.getName() + "\" to Gboard Clipboard — paste in any app!");
+                        }
                     });
+
+            if (stickerBytes != null && stickerBytes.length > 0) {
+                addActionSheetButton(
+                        context,
+                        root,
+                        "Edit Cutout & Border in Studio",
+                        false,
+                        false,
+                        () -> {
+                            if (dialogRef[0] != null) {
+                                dialogRef[0].dismiss();
+                            }
+                            if (item.isAnimatedGif()) {
+                                showGifStickerStudioDialog(
+                                        activeHost, item.getName(), stickerBytes, item.getId());
+                            } else {
+                                showImageStickerStudioDialog(
+                                        activeHost, item.getName(), stickerBytes, item.getId());
+                            }
+                        });
+            }
 
             addActionSheetButton(
                     context,
                     root,
-                    "Share Sticker",
+                    "Share Sticker to App...",
                     false,
                     false,
                     () -> {
@@ -971,7 +1229,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                             String ext = item.isAnimatedGif() ? ".gif" : ".png";
                             String safeFile = sanitizeFileName(item.getName()) + ext;
                             GboardPatchesSettingsContract.createBinaryDocument(
-                                    host,
+                                    activeHost,
                                     safeFile,
                                     item.getMimeType(),
                                     stickerBytes,
@@ -993,7 +1251,7 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                             dialogRef[0].dismiss();
                         }
                         GboardCustomStickerRepository.toggleFavorite(context, item.getId());
-                        GboardPatchesSettingsContract.refresh(host);
+                        GboardPatchesSettingsContract.refresh(activeHost);
                     });
 
             addActionSheetButton(
@@ -1007,13 +1265,13 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                             dialogRef[0].dismiss();
                         }
                         GboardPatchesSettingsContract.showTextInputDialog(
-                                host,
+                                activeHost,
                                 "Rename Sticker",
                                 "Sticker Name",
                                 item.getName(),
                                 newName -> {
                                     GboardCustomStickerRepository.renameSticker(context, item.getId(), newName);
-                                    GboardPatchesSettingsContract.refresh(host);
+                                    GboardPatchesSettingsContract.refresh(activeHost);
                                 });
                     });
 
@@ -1028,8 +1286,8 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
                             dialogRef[0].dismiss();
                         }
                         GboardCustomStickerRepository.deleteSticker(context, item.getId());
-                        GboardPatchesSettingsContract.showMessage(host, "Sticker deleted.");
-                        GboardPatchesSettingsContract.refresh(host);
+                        GboardPatchesSettingsContract.showMessage(activeHost, "Sticker deleted.");
+                        GboardPatchesSettingsContract.refresh(activeHost);
                     });
 
             AlertDialog dialog = new AlertDialog.Builder(context)
@@ -1044,41 +1302,72 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
         });
     }
 
-    private void showClearAllConfirmationDialog(final GboardPatchesSettingsContract.FeatureHost host) {
-        if (host == null) {
-            return;
-        }
-        final Context context = host.getContext();
-        if (context == null) {
-            return;
-        }
-        GboardPatchesSettingsContract.showManagedDialog(host, onDismiss -> {
-            AlertDialog dialog = new AlertDialog.Builder(context)
-                    .setTitle(GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_clear_all_confirm_title))
-                    .setMessage(GboardSettingsText.get(context, R.string.gboard_patches_custom_stickers_clear_all_confirm_message))
-                    .setNegativeButton(GboardSettingsText.get(context, R.string.gboard_patches_dialog_cancel), null)
-                    .setPositiveButton("Delete All", (d, w) -> {
-                        GboardCustomStickerRepository.clearAllStickers(context);
-                        GboardPatchesSettingsContract.showMessage(host, "All custom stickers deleted.");
-                        GboardPatchesSettingsContract.refresh(host);
-                    })
-                    .create();
-            dialog.setOnDismissListener(ignored -> onDismiss.run());
-            dialog.show();
-            return true;
-        });
+    private interface BooleanChangeListener {
+        void onChanged(boolean checked);
     }
 
-    private static Switch addStudioSwitchRow(
+    private static final class StudioToggleControl {
+        private final LinearLayout row;
+        private final TextView pill;
+        private boolean checked;
+        private boolean enabled = true;
+        private final Context context;
+
+        StudioToggleControl(Context context, LinearLayout row, TextView pill, boolean initialChecked) {
+            this.context = context;
+            this.row = row;
+            this.pill = pill;
+            this.checked = initialChecked;
+            updateVisuals();
+        }
+
+        boolean isChecked() {
+            return checked;
+        }
+
+        void setChecked(boolean value) {
+            this.checked = value;
+            updateVisuals();
+        }
+
+        void setEnabled(boolean value) {
+            this.enabled = value;
+            row.setEnabled(value);
+            row.setAlpha(value ? 1.0f : 0.45f);
+            updateVisuals();
+        }
+
+        boolean isEnabled() {
+            return enabled;
+        }
+
+        private void updateVisuals() {
+            pill.setText(checked ? "ON" : "OFF");
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dp(context, 999));
+            if (checked) {
+                bg.setColor(0xFFA8C7FA);
+                pill.setTextColor(0xFF062E6F);
+            } else {
+                bg.setColor(0x22FFFFFF);
+                bg.setStroke(dp(context, 1), 0x44FFFFFF);
+                pill.setTextColor(0xFFC4C7C5);
+            }
+            pill.setBackground(bg);
+        }
+    }
+
+    private static StudioToggleControl addSafeToggleRow(
             Context context,
             LinearLayout parent,
             String title,
             String subtitle,
-            boolean initialChecked) {
+            boolean initialChecked,
+            BooleanChangeListener listener) {
         LinearLayout row = new LinearLayout(context);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(0, dp(context, 6), 0, dp(context, 6));
+        row.setPadding(0, dp(context, 7), 0, dp(context, 7));
 
         LinearLayout textCol = new LinearLayout(context);
         textCol.setOrientation(LinearLayout.VERTICAL);
@@ -1099,17 +1388,99 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             textCol.addView(subView);
         }
 
-        final Switch sw = new Switch(context);
-        sw.setChecked(initialChecked);
+        TextView pill = new TextView(context);
+        pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        pill.setTypeface(Typeface.DEFAULT_BOLD);
+        pill.setGravity(Gravity.CENTER);
+        pill.setPadding(dp(context, 14), dp(context, 6), dp(context, 14), dp(context, 6));
+        LinearLayout.LayoutParams pillLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        pillLp.leftMargin = dp(context, 10);
+        pill.setLayoutParams(pillLp);
+
         row.addView(textCol);
-        row.addView(sw);
+        row.addView(pill);
+
+        final StudioToggleControl control = new StudioToggleControl(context, row, pill, initialChecked);
         row.setOnClickListener(v -> {
-            if (sw.isEnabled()) {
-                sw.setChecked(!sw.isChecked());
+            if (!control.isEnabled()) {
+                return;
+            }
+            boolean next = !control.isChecked();
+            control.setChecked(next);
+            if (listener != null) {
+                listener.onChanged(next);
             }
         });
         parent.addView(row);
-        return sw;
+        return control;
+    }
+
+    private static void addSensitivityPresetBar(
+            Context context,
+            LinearLayout parent,
+            final int[] toleranceState,
+            final Runnable onUpdate) {
+        LinearLayout bar = new LinearLayout(context);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        barLp.bottomMargin = dp(context, 8);
+        bar.setLayoutParams(barLp);
+
+        final int[] presets = new int[] { 18, 32, 48, 64 };
+        final String[] labels = new String[] { "18%", "32%", "48%", "64%" };
+
+        TextView minusBtn = buildSensitivityStepChip(context, "−5%");
+        minusBtn.setOnClickListener(v -> {
+            toleranceState[0] = Math.max(5, toleranceState[0] - 5);
+            onUpdate.run();
+        });
+        bar.addView(minusBtn);
+
+        for (int i = 0; i < presets.length; i++) {
+            final int presetVal = presets[i];
+            TextView chip = buildSensitivityStepChip(context, labels[i]);
+            chip.setOnClickListener(v -> {
+                toleranceState[0] = presetVal;
+                onUpdate.run();
+            });
+            bar.addView(chip);
+        }
+
+        TextView plusBtn = buildSensitivityStepChip(context, "+5%");
+        plusBtn.setOnClickListener(v -> {
+            toleranceState[0] = Math.min(85, toleranceState[0] + 5);
+            onUpdate.run();
+        });
+        bar.addView(plusBtn);
+
+        parent.addView(bar);
+    }
+
+    private static TextView buildSensitivityStepChip(Context context, String text) {
+        TextView chip = new TextView(context);
+        chip.setText(text);
+        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        chip.setTypeface(Typeface.DEFAULT_BOLD);
+        chip.setTextColor(0xFFE3E3E3);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(dp(context, 8), dp(context, 6), dp(context, 8), dp(context, 6));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x22FFFFFF);
+        bg.setCornerRadius(dp(context, 10));
+        bg.setStroke(dp(context, 1), 0x33FFFFFF);
+        chip.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f);
+        lp.rightMargin = dp(context, 4);
+        chip.setLayoutParams(lp);
+        return chip;
     }
 
     private static void addActionSheetButton(
@@ -1171,25 +1542,11 @@ public final class GboardCustomStickersFeature implements GboardPatchesSettingsC
             } catch (Throwable ignored) {
             }
         }
-        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        Bitmap bitmap = GboardStickerImageProcessor.decodeBoundedBitmap(
+                bytes, GboardStickerImageProcessor.DEFAULT_MAX_STICKER_DIMENSION_PX);
         if (bitmap != null) {
             imageView.setImageBitmap(bitmap);
         }
-    }
-
-    private static Bitmap scaleDownIfNeeded(Bitmap source, int maxDimension) {
-        if (source == null) {
-            return null;
-        }
-        int w = source.getWidth();
-        int h = source.getHeight();
-        if (w <= maxDimension && h <= maxDimension) {
-            return source;
-        }
-        float scale = Math.min((float) maxDimension / w, (float) maxDimension / h);
-        int targetW = Math.max(1, Math.round(w * scale));
-        int targetH = Math.max(1, Math.round(h * scale));
-        return Bitmap.createScaledBitmap(source, targetW, targetH, true);
     }
 
     private static String stripExtension(String fileName, String fallback) {

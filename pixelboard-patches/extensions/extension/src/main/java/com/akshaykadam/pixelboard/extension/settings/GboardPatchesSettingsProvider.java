@@ -42,7 +42,8 @@ public final class GboardPatchesSettingsProvider extends ContentProvider {
             }
             String[] cols = (projection != null && projection.length > 0)
                     ? projection
-                    : new String[] { OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE };
+                    : new String[] { OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE, "mime_type" };
+            String mimeType = GboardCustomStickerRepository.resolveMimeTypeForFileName(stickerFileName);
             MatrixCursor cursor = new MatrixCursor(cols, 1);
             Object[] row = new Object[cols.length];
             for (int i = 0; i < cols.length; i++) {
@@ -51,6 +52,8 @@ public final class GboardPatchesSettingsProvider extends ContentProvider {
                     row[i] = stickerFile.getName();
                 } else if (OpenableColumns.SIZE.equals(col)) {
                     row[i] = Long.valueOf(stickerFile.length());
+                } else if ("mime_type".equals(col)) {
+                    row[i] = mimeType;
                 } else {
                     row[i] = null;
                 }
@@ -91,6 +94,17 @@ public final class GboardPatchesSettingsProvider extends ContentProvider {
             return GboardCustomStickerRepository.resolveMimeTypeForFileName(stickerFileName);
         }
         return "application/vnd.android.package-archive";
+    }
+
+    @Override
+    public String[] getStreamTypes(Uri uri, String mimeTypeFilter) {
+        String stickerFileName = extractStickerFileName(uri);
+        if (stickerFileName != null) {
+            return new String[] {
+                    GboardCustomStickerRepository.resolveMimeTypeForFileName(stickerFileName)
+            };
+        }
+        return super.getStreamTypes(uri, mimeTypeFilter);
     }
 
     static String extractStickerFileName(Uri uri) {

@@ -211,6 +211,9 @@ public final class GboardPatchesSettingsActivity extends Activity
     private final Object screenBuildLock = new Object();
     private int requestedScrollYOnNextScreenApply = 0;
     private boolean initialFeatureFromIntentHandled;
+    private static volatile GboardPatchesSettingsActivity sActiveInstance;
+    private static volatile GboardPatchesSettingsContract.BinaryDocumentConsumer sPendingBinaryDocumentReader;
+    private static volatile GboardPatchesSettingsContract.StringValueConsumer sPendingTextDocumentReader;
     private PendingTextDocumentWrite pendingTextDocumentWrite;
     private GboardPatchesSettingsContract.StringValueConsumer pendingTextDocumentReader;
     private PendingBinaryDocumentWrite pendingBinaryDocumentWrite;
@@ -251,6 +254,22 @@ public final class GboardPatchesSettingsActivity extends Activity
         } catch (Throwable ignored) {
         }
         super.onCreate(savedInstanceState);
+        sActiveInstance = this;
+        if (savedInstanceState != null) {
+            try {
+                ArrayList<String> savedPath =
+                        savedInstanceState.getStringArrayList(EXTRA_NAVIGATION_PATH);
+                if (savedPath != null && !savedPath.isEmpty()) {
+                    Intent currentIntent = getIntent();
+                    if (currentIntent == null) {
+                        currentIntent = new Intent();
+                        setIntent(currentIntent);
+                    }
+                    currentIntent.putStringArrayListExtra(EXTRA_NAVIGATION_PATH, savedPath);
+                }
+            } catch (Throwable ignored) {
+            }
+        }
         try {
             scheduleRestartCrashRecoveryGuardRestore();
             palette = Palette.forContext(this, getResources().getConfiguration());
@@ -278,9 +297,32 @@ public final class GboardPatchesSettingsActivity extends Activity
     @Override
     protected void onResume() {
         super.onResume();
+        sActiveInstance = this;
         featureLifecycleEnabled = true;
         applyOrchestration(settingsOrchestrator.accept(
                 GboardPatchesSettingsOrchestrator.Event.resume()));
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (outState == null) {
+            return;
+        }
+        try {
+            GboardPatchesSettingsOrchestrator.State<GboardPatchesSettingsContract.Feature> state =
+                    settingsOrchestrator.snapshot();
+            ArrayList<String> navigationPath = GboardPatchesNavigationPath.capture(
+                    state.getBackStack(), state.getCurrent());
+            if (navigationPath != null && !navigationPath.isEmpty()) {
+                outState.putStringArrayList(EXTRA_NAVIGATION_PATH, navigationPath);
+                Intent currentIntent = getIntent();
+                if (currentIntent != null) {
+                    currentIntent.putStringArrayListExtra(EXTRA_NAVIGATION_PATH, navigationPath);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
@@ -318,13 +360,25 @@ public final class GboardPatchesSettingsActivity extends Activity
         super.onBackPressed();
     }
 
+    private boolean isDeadHost() {
+        return isFinishing()
+                || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed());
+    }
+
     @Override
     public Context getContext() {
+        if (isDeadHost() && sActiveInstance != null && sActiveInstance != this) {
+            return sActiveInstance;
+        }
         return this;
     }
 
     @Override
     public void submit(GboardPatchesSettingsContract.Intent intent) {
+        if (isDeadHost() && sActiveInstance != null && sActiveInstance != this) {
+            sActiveInstance.submit(intent);
+            return;
+        }
         applyOrchestration(settingsOrchestrator.accept(
                 GboardPatchesSettingsOrchestrator.Event.featureIntent(intent)));
     }
@@ -336,6 +390,10 @@ public final class GboardPatchesSettingsActivity extends Activity
 
     @Override
     public void refresh() {
+        if (isDeadHost() && sActiveInstance != null && sActiveInstance != this) {
+            sActiveInstance.refresh();
+            return;
+        }
         initializeFeaturesAndRenderSafely();
     }
 
@@ -885,6 +943,10 @@ public final class GboardPatchesSettingsActivity extends Activity
         if (action == null) {
             return;
         }
+        if (isDeadHost() && sActiveInstance != null && sActiveInstance != this) {
+            sActiveInstance.showManagedDialog(action);
+            return;
+        }
         if (Looper.myLooper() != Looper.getMainLooper()) {
             runOnUiThread(() -> showManagedDialog(action));
             return;
@@ -985,19 +1047,39 @@ public final class GboardPatchesSettingsActivity extends Activity
             return;
         }
         pendingBinaryDocumentReader = documentConsumer;
+        sPendingBinaryDocumentReader = documentConsumer;
         String[] normalizedMimeTypes = normalizeMimeTypes(mimeTypes);
+        String primaryMime = normalizedMimeTypes.length == 1 ? normalizedMimeTypes[0] : "*/*";
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
-                .setType(normalizedMimeTypes.length == 1 ? normalizedMimeTypes[0] : "*/*");
+                .setType(primaryMime);
         if (normalizedMimeTypes.length > 1) {
             intent.putExtra(Intent.EXTRA_MIME_TYPES, normalizedMimeTypes);
         }
         try {
             startActivityForResult(intent, REQUEST_OPEN_BINARY_DOCUMENT);
+        } catch (ActivityNotFoundException fallbackAttempt) {
+            try {
+                Intent getContentIntent = new Intent(Intent.ACTION_GET_CONTENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+                        .setType(primaryMime);
+                if (normalizedMimeTypes.length > 1) {
+                    getContentIntent.putExtra(Intent.EXTRA_MIME_TYPES, normalizedMimeTypes);
+                }
+                startActivityForResult(getContentIntent, REQUEST_OPEN_BINARY_DOCUMENT);
+            } catch (Throwable throwable) {
+                pendingBinaryDocumentReader = null;
+                sPendingBinaryDocumentReader = null;
+                Log.w(TAG, "Failed to launch binary document open picker", throwable);
+                Toast.makeText(this, DOCUMENT_PICKER_FAILED, Toast.LENGTH_SHORT).show();
+            }
         } catch (Throwable throwable) {
             pendingBinaryDocumentReader = null;
+            sPendingBinaryDocumentReader = null;
             Log.w(TAG, "Failed to launch binary document open picker", throwable);
             Toast.makeText(this, DOCUMENT_PICKER_FAILED, Toast.LENGTH_SHORT).show();
         }
@@ -1124,6 +1206,10 @@ public final class GboardPatchesSettingsActivity extends Activity
 
     @Override
     public void showMessage(String message) {
+        if (isDeadHost() && sActiveInstance != null && sActiveInstance != this) {
+            sActiveInstance.showMessage(message);
+            return;
+        }
         if (Looper.myLooper() != Looper.getMainLooper()) {
             runOnUiThread(() -> showMessage(message));
             return;
@@ -1463,17 +1549,30 @@ public final class GboardPatchesSettingsActivity extends Activity
     }
 
     private void handleOpenBinaryDocumentResult(int resultCode, Intent data) {
-        GboardPatchesSettingsContract.BinaryDocumentConsumer reader =
-                pendingBinaryDocumentReader;
+        final GboardPatchesSettingsContract.BinaryDocumentConsumer reader =
+                pendingBinaryDocumentReader != null
+                        ? pendingBinaryDocumentReader
+                        : sPendingBinaryDocumentReader;
         pendingBinaryDocumentReader = null;
+        sPendingBinaryDocumentReader = null;
         Uri uri = selectedDocumentUri(data);
         if (resultCode != RESULT_OK || uri == null || reader == null) {
             return;
         }
         try {
-            reader.accept(new GboardPatchesSettingsContract.BinaryDocument(
-                    queryDisplayName(uri), getContentResolver().getType(uri),
-                    readBinaryDocument(uri)));
+            final GboardPatchesSettingsContract.BinaryDocument document =
+                    new GboardPatchesSettingsContract.BinaryDocument(
+                            queryDisplayName(uri),
+                            getContentResolver().getType(uri),
+                            readBinaryDocument(uri));
+            postToDecorView(() -> {
+                try {
+                    reader.accept(document);
+                } catch (Throwable callbackThrowable) {
+                    Log.w(TAG, "Failed to process selected binary document", callbackThrowable);
+                    Toast.makeText(this, DOCUMENT_READ_FAILED, Toast.LENGTH_SHORT).show();
+                }
+            });
         } catch (Throwable throwable) {
             Log.w(TAG, "Failed to read selected binary document", throwable);
             Toast.makeText(this, DOCUMENT_READ_FAILED, Toast.LENGTH_SHORT).show();
@@ -3693,8 +3792,10 @@ public final class GboardPatchesSettingsActivity extends Activity
         ImageView iconView = null;
         if (icon != null) {
             iconView = new ImageView(this);
+            iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
             iconView.setImageDrawable(icon);
-            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(24), dp(24));
+            int iconSize = icon.getIntrinsicWidth() > dp(32) ? dp(44) : dp(24);
+            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(iconSize, iconSize);
             iconParams.rightMargin = dp(16);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                 iconParams.setMarginEnd(dp(16));

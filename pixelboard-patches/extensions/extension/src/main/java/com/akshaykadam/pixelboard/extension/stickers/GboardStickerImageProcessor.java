@@ -323,7 +323,7 @@ public final class GboardStickerImageProcessor {
         }
         Bitmap previewFrame = null;
         try {
-            previewFrame = BitmapFactory.decodeByteArray(outputBytes, 0, outputBytes.length);
+            previewFrame = ensureArgb8888(decodeBoundedBitmap(outputBytes, DEFAULT_MAX_STICKER_DIMENSION_PX));
             if (previewFrame != null && bgRemoved) {
                 // Also apply pixel-level cutout to the static preview bitmap if BitmapFactory
                 // decoded the first frame without GCE transparency on older Android versions.
@@ -565,14 +565,15 @@ public final class GboardStickerImageProcessor {
         if (sourceBitmap == null) {
             throw new IllegalArgumentException("Source bitmap must not be null.");
         }
+        Bitmap readableBitmap = ensureArgb8888(sourceBitmap);
         StickerOptions effectiveOptions = options != null ? options : StickerOptions.defaults();
-        int width = sourceBitmap.getWidth();
-        int height = sourceBitmap.getHeight();
+        int width = readableBitmap.getWidth();
+        int height = readableBitmap.getHeight();
         if (width <= 0 || height <= 0) {
             throw new IllegalArgumentException("Source bitmap has invalid dimensions.");
         }
         int[] pixels = new int[width * height];
-        sourceBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+        readableBitmap.getPixels(pixels, 0, width, 0, 0, width, height);
 
         PixelImage processed = processPixelImage(new PixelImage(pixels, width, height), effectiveOptions);
         Bitmap outputBitmap = Bitmap.createBitmap(
@@ -1217,9 +1218,30 @@ public final class GboardStickerImageProcessor {
             BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
             decodeOptions.inSampleSize = sampleSize;
             decodeOptions.inPreferredConfig = Bitmap.Config.ARGB_8888;
-            return BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.length, decodeOptions);
+            decodeOptions.inMutable = true;
+            Bitmap decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.length, decodeOptions);
+            return ensureArgb8888(decoded);
         } catch (Throwable ignored) {
             return null;
+        }
+    }
+
+    /**
+     * Ensures the given {@link Bitmap} uses {@link Bitmap.Config#ARGB_8888} so pixel reads via
+     * {@link Bitmap#getPixels} and {@link Bitmap#getPixel} never fail on hardware or F16 bitmaps.
+     */
+    public static Bitmap ensureArgb8888(Bitmap bitmap) {
+        if (bitmap == null) {
+            return null;
+        }
+        try {
+            if (bitmap.getConfig() == Bitmap.Config.ARGB_8888) {
+                return bitmap;
+            }
+            Bitmap converted = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+            return converted != null ? converted : bitmap;
+        } catch (Throwable ignored) {
+            return bitmap;
         }
     }
 }

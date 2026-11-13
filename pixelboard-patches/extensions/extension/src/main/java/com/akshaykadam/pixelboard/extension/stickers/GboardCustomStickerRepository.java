@@ -258,6 +258,77 @@ public final class GboardCustomStickerRepository {
         }
     }
 
+    public static CustomStickerItem updateProcessedSticker(
+            Context context,
+            String existingId,
+            String name,
+            GboardStickerImageProcessor.ProcessedStickerResult processed) throws IOException {
+        if (existingId == null || existingId.isEmpty()) {
+            return saveProcessedSticker(context, name, processed);
+        }
+        if (processed == null || processed.getEncodedBytes() == null
+                || processed.getEncodedBytes().length == 0) {
+            throw new IllegalArgumentException("Processed sticker result has no encoded bytes.");
+        }
+        synchronized (LOCK) {
+            File dir = resolveStickersDirectory(context);
+            List<CustomStickerItem> items = readIndexLocked(dir);
+            int targetIdx = -1;
+            CustomStickerItem oldItem = null;
+            for (int i = 0; i < items.size(); i++) {
+                if (existingId.equals(items.get(i).getId())) {
+                    targetIdx = i;
+                    oldItem = items.get(i);
+                    break;
+                }
+            }
+            if (oldItem == null) {
+                return saveProcessedSticker(context, name, processed);
+            }
+
+            // Write to a fresh file name so ContentProvider / Glide / Clipboard URI caches see the new image
+            long now = System.currentTimeMillis();
+            String shortUuid = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+            String ext = processed.getFileExtension();
+            if (ext == null || !ext.startsWith(".")) {
+                ext = processed.isAnimatedGif() ? ".gif" : ".png";
+            }
+            String newFileName = existingId + "_" + shortUuid + ext;
+            File outFile = new File(dir, newFileName);
+
+            byte[] bytes = processed.getEncodedBytes();
+            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                fos.write(bytes);
+                fos.flush();
+            }
+
+            if (!newFileName.equals(oldItem.getFileName())) {
+                File oldFile = new File(dir, oldItem.getFileName());
+                if (oldFile.exists()) {
+                    oldFile.delete();
+                }
+            }
+
+            String cleanName = sanitizeDisplayName(name, processed.isAnimatedGif());
+            CustomStickerItem updatedItem = new CustomStickerItem(
+                    existingId,
+                    cleanName,
+                    newFileName,
+                    processed.getMimeType(),
+                    processed.getWidth(),
+                    processed.getHeight(),
+                    bytes.length,
+                    processed.isAnimatedGif(),
+                    processed.isBackgroundRemoved(),
+                    processed.isOutlineApplied(),
+                    oldItem.isFavorite(),
+                    now);
+            items.set(targetIdx, updatedItem);
+            writeIndexLocked(dir, items);
+            return updatedItem;
+        }
+    }
+
     public static CustomStickerItem toggleFavorite(Context context, String stickerId) {
         if (stickerId == null || stickerId.isEmpty()) {
             return null;

@@ -233,6 +233,8 @@ public final class GboardCustomStickerRuntime {
             }
             ClipData clip = ClipData.newUri(context.getContentResolver(), item.getName(), contentUri);
             clipboard.setPrimaryClip(clip);
+            com.akshaykadam.pixelboard.extension.clipboard.GboardClipboardSyncRuntime
+                    .notifyClipboardChanged();
             return true;
         } catch (Throwable t) {
             try {
@@ -301,18 +303,15 @@ public final class GboardCustomStickerRuntime {
      * in-keyboard sticker picker drawer.
      */
     public static void onAccessPointsPanelReady(View panelView) {
-        if (!(panelView instanceof ViewGroup)) {
+        ViewGroup panelGroup = resolveTargetAccessPointsPanel(panelView);
+        if (panelGroup == null) {
             return;
         }
-        ViewGroup panelGroup = (ViewGroup) panelView;
         Context context = panelGroup.getContext();
         if (context == null) {
             return;
         }
         captureInputMethodServiceState(context);
-        if (!shouldInjectIntoPanel(panelGroup)) {
-            return;
-        }
         if (!GboardCustomStickerSettings.isEnabled(context)
                 || !GboardCustomStickerSettings.isShowInFeaturesMenuEnabled(context)) {
             View existingBar = panelGroup.findViewWithTag(STICKER_BAR_VIEW_TAG);
@@ -326,10 +325,12 @@ public final class GboardCustomStickerRuntime {
             View existingBar = panelGroup.findViewWithTag(STICKER_BAR_VIEW_TAG);
             if (existingBar != null) {
                 refreshStickerBarContent(context, (ViewGroup) existingBar);
+                existingBar.bringToFront();
                 return;
             }
             LinearLayout container = buildInKeyboardStickerContainer(context);
             panelGroup.addView(container);
+            container.bringToFront();
         } catch (Throwable t) {
             try {
                 Log.w(TAG, "Failed to inject Custom Stickers bar into AccessPointsPanel", t);
@@ -338,15 +339,36 @@ public final class GboardCustomStickerRuntime {
         }
     }
 
-    static boolean shouldInjectIntoPanel(View panelView) {
-        if (panelView == null) {
-            return false;
+    static ViewGroup resolveTargetAccessPointsPanel(View panelView) {
+        if (!(panelView instanceof ViewGroup)) {
+            return null;
         }
         if (forceInjectPanelForTesting) {
-            return true;
+            return (ViewGroup) panelView;
+        }
+        android.view.ViewParent cursor = (panelView instanceof ViewGroup)
+                ? (android.view.ViewParent) panelView
+                : panelView.getParent();
+        int depth = 0;
+        while (cursor instanceof View && depth < 6) {
+            View v = (View) cursor;
+            if (v instanceof FrameLayout) {
+                String name = v.getClass().getName();
+                if (name.endsWith(".AccessPointsPanel")
+                        || name.endsWith(".AccessPointsPanelV2")
+                        || name.endsWith(".WidgetAccessPointsPanel")) {
+                    return (ViewGroup) v;
+                }
+            }
+            cursor = v.getParent();
+            depth++;
         }
         String className = panelView.getClass().getName();
-        return className.contains("AccessPointsPanel");
+        if (className.endsWith(".AccessPointsPanel")
+                || className.endsWith(".AccessPointsPanelV2")) {
+            return (ViewGroup) panelView;
+        }
+        return null;
     }
 
     private static LinearLayout buildInKeyboardStickerContainer(Context context) {
@@ -354,6 +376,9 @@ public final class GboardCustomStickerRuntime {
         wrapper.setTag(STICKER_BAR_VIEW_TAG);
         wrapper.setOrientation(LinearLayout.VERTICAL);
         wrapper.setGravity(Gravity.BOTTOM);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            wrapper.setElevation(dp(context, 16));
+        }
 
         FrameLayout.LayoutParams wrapperParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -396,7 +421,7 @@ public final class GboardCustomStickerRuntime {
         LinearLayout drawerContainer = new LinearLayout(context);
         drawerContainer.setTag(STICKER_DRAWER_VIEW_TAG);
         drawerContainer.setOrientation(LinearLayout.VERTICAL);
-        drawerContainer.setVisibility(View.GONE);
+        drawerContainer.setVisibility(stickers.isEmpty() ? View.GONE : View.VISIBLE);
 
         TextView titleBtn = new TextView(context);
         titleBtn.setText("Custom Stickers (" + stickers.size() + ")");

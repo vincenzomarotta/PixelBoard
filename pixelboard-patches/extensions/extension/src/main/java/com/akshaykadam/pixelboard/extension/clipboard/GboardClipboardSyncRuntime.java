@@ -3,6 +3,7 @@ package com.akshaykadam.pixelboard.extension.clipboard;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.util.Log;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
@@ -20,6 +21,7 @@ import java.lang.reflect.Method;
 public final class GboardClipboardSyncRuntime {
 
     private static final String TAG = "PixelBoardClipboard";
+    private static volatile WeakReference<Object> activeHandlerRef = new WeakReference<Object>(null);
     private static volatile Field clipboardManagerField;
     private static volatile Field contextField;
     private static volatile Field contentObserverField;
@@ -31,6 +33,20 @@ public final class GboardClipboardSyncRuntime {
     }
 
     /**
+     * Notifies the last known Gboard ClipboardDataHandler that the primary clipboard changed
+     * (e.g., when a custom sticker URI is copied to the clipboard).
+     */
+    public static void notifyClipboardChanged() {
+        try {
+            Object handler = activeHandlerRef.get();
+            if (handler != null) {
+                syncOnStartInputView(handler);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
      * Synchronizes clipboard contents when input starts.
      *
      * @param handler the Gboard ClipboardDataHandler instance (Lfmg)
@@ -39,6 +55,7 @@ public final class GboardClipboardSyncRuntime {
         if (handler == null) {
             return;
         }
+        activeHandlerRef = new WeakReference<Object>(handler);
         try {
             Field ctxField = resolveContextField(handler);
             if (ctxField != null) {
