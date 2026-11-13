@@ -104,9 +104,43 @@ public final class GboardCustomStickerRuntime {
         if (context != null) {
             Context appCtx = context.getApplicationContext();
             activeContextRef = new WeakReference<Context>(appCtx != null ? appCtx : context);
+            captureInputMethodServiceState(context);
         }
         if (editorInfoCandidate instanceof EditorInfo) {
             activeEditorInfo = (EditorInfo) editorInfoCandidate;
+        }
+    }
+
+    private static void captureInputMethodServiceState(Context context) {
+        Context cursor = context;
+        int depth = 0;
+        while (cursor != null && depth < 10) {
+            if (cursor instanceof android.inputmethodservice.InputMethodService) {
+                android.inputmethodservice.InputMethodService ims =
+                        (android.inputmethodservice.InputMethodService) cursor;
+                try {
+                    InputConnection ic = ims.getCurrentInputConnection();
+                    if (ic != null) {
+                        activeInputConnectionRef = new WeakReference<InputConnection>(ic);
+                    }
+                    EditorInfo ei = ims.getCurrentInputEditorInfo();
+                    if (ei != null) {
+                        activeEditorInfo = ei;
+                    }
+                } catch (Throwable ignored) {
+                }
+                return;
+            }
+            if (cursor instanceof android.content.ContextWrapper) {
+                Context base = ((android.content.ContextWrapper) cursor).getBaseContext();
+                if (base == cursor) {
+                    break;
+                }
+                cursor = base;
+            } else {
+                break;
+            }
+            depth++;
         }
     }
 
@@ -126,6 +160,9 @@ public final class GboardCustomStickerRuntime {
         Context effectiveContext = resolveContext(context);
         if (effectiveContext == null || item == null) {
             return CommitResult.FAILED;
+        }
+        if (context != null) {
+            captureInputMethodServiceState(context);
         }
         if (!GboardCustomStickerSettings.isEnabled(effectiveContext)) {
             return CommitResult.FAILED;
@@ -272,6 +309,7 @@ public final class GboardCustomStickerRuntime {
         if (context == null) {
             return;
         }
+        captureInputMethodServiceState(context);
         if (!shouldInjectIntoPanel(panelGroup)) {
             return;
         }
